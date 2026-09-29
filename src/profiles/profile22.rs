@@ -261,6 +261,33 @@ mod tests {
     }
 
     #[test]
+    fn test_profile22_at_offset_zero_is_profile2_on_the_wire() {
+        // Profile 2 CRC over the data after the CRC byte, then the counter's Data ID.
+        // Each frame carries counter 1, the first a sender writes.
+        let vectors: &[(u8, &[u8], u8)] = &[
+            (0x12, &[0x01, 0x02, 0x03], 0x5f),
+            (0xff, &[0x01, 0x02, 0x03], 0xed),
+            (0xa5, &[0x01, 0x23, 0x45, 0x67, 0x89], 0x1a),
+        ];
+        for (data_id, data, expected) in vectors {
+            let mut data_id_list = [0u8; DATA_ID_NUMBER];
+            data_id_list[1] = *data_id;
+            let config = Profile22Config {
+                data_length: (data.len() + 1) * BITS_PER_BYTE,
+                data_id_list,
+                ..Default::default()
+            };
+            let mut profile_tx = Profile22::new(config.clone()).unwrap();
+            let mut profile_rx = Profile22::new(config).unwrap();
+            let mut frame = [&[0x00], *data].concat();
+            profile_tx.protect(&mut frame).unwrap();
+            assert_eq!(&frame[1..], *data, "data_id {data_id:#04x}");
+            assert_eq!(frame[0], *expected, "data_id {data_id:#04x}");
+            assert_eq!(profile_rx.check(&frame).unwrap(), E2EStatus::Ok);
+        }
+    }
+
+    #[test]
     fn test_profile22_offset_example() {
         let config = Profile22Config {
             offset: 64,
