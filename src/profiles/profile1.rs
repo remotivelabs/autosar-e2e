@@ -131,6 +131,13 @@ impl Profile1 {
             ));
         }
 
+        // The CRC byte and the counter nibble, in whole bytes.
+        if config.data_length < 2 * BITS_PER_BYTE {
+            return Err(E2EError::InvalidConfiguration(
+                "Data length shall hold the CRC and the counter, at least 16 bits".into(),
+            ));
+        }
+
         if config.max_delta_counter == 0 || config.max_delta_counter > COUNTER_MAX {
             return Err(E2EError::InvalidConfiguration(format!(
                 "Max delta counter must be between 1 and {}",
@@ -158,10 +165,15 @@ impl Profile1 {
             ));
         }
 
-        let last_bit = config.data_length.saturating_sub(1);
-        if config.counter_offset > last_bit
-            || config.crc_offset > last_bit
-            || (config.mode == Profile1IdMode::Nibble && config.nibble_offset > last_bit)
+        // Each field lies wholly within the data, which also rules out data too short for the CRC
+        // byte and the counter nibble.
+        let fits = |offset: u8, bits: u8| {
+            u16::from(offset) + u16::from(bits) <= u16::from(config.data_length)
+        };
+        if !fits(config.counter_offset, BITS_PER_NIBBLE)
+            || !fits(config.crc_offset, BITS_PER_BYTE)
+            || (config.mode == Profile1IdMode::Nibble
+                && !fits(config.nibble_offset, BITS_PER_NIBBLE))
         {
             return Err(E2EError::InvalidConfiguration(
                 "Offsets shall lie within the data length".into(),
@@ -307,7 +319,12 @@ impl E2EProfile for Profile1 {
         self.validate_length(data.len())?;
         let rx_counter = self.read_nibble_data(self.config.counter_offset, data);
         let check_items = Profile1Check {
-            rx_nibble: self.read_nibble_data(self.config.nibble_offset, data),
+            // Only Nibble mode sends the Data-ID nibble, so only it has an offset that was checked.
+            rx_nibble: if self.config.mode == Profile1IdMode::Nibble {
+                self.read_nibble_data(self.config.nibble_offset, data)
+            } else {
+                0
+            },
             rx_counter,
             rx_crc: self.read_crc(data),
             calculated_crc: self.compute_crc(data, rx_counter),
@@ -330,6 +347,40 @@ mod tests {
             mode,
             data_id: 0x1234,
             ..Default::default()
+        }
+    }
+
+    #[test]
+    fn test_profile1_nibble_offset_outside_the_data_is_ignored_unless_nibble_mode() {
+        let config = Profile1Config {
+            mode: Profile1IdMode::Both,
+            data_length: 32,
+            nibble_offset: 60,
+            ..Default::default()
+        };
+        let mut sender = Profile1::new(config.clone()).unwrap();
+        let mut receiver = Profile1::new(config.clone()).unwrap();
+        let mut data = [0u8; 4];
+        sender.protect(&mut data).unwrap();
+        assert_eq!(receiver.check(&data).unwrap(), E2EStatus::Ok);
+
+        let nibble = Profile1Config {
+            mode: Profile1IdMode::Nibble,
+            ..config
+        };
+        assert!(Profile1::new(nibble).is_err());
+    }
+
+    #[test]
+    fn test_profile1_data_too_short_for_its_fields_is_refused() {
+        for data_length in [0, 8] {
+            let config = Profile1Config {
+                data_length,
+                crc_offset: 0,
+                counter_offset: 0,
+                ..Default::default()
+            };
+            assert!(Profile1::new(config).is_err(), "{data_length} bits");
         }
     }
 
