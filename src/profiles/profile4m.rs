@@ -94,6 +94,10 @@ impl E2EProfile for Profile4m {
         Ok(())
     }
 
+    fn set_counter(&mut self, counter: u32) -> E2EResult<()> {
+        self.base.set_counter(counter)
+    }
+
     fn check(&mut self, data: &[u8]) -> E2EResult<E2EStatus> {
         let mut status = self.base.check(data)?;
         let check_items = Profile4mCheck {

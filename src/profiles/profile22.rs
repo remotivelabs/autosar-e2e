@@ -172,6 +172,18 @@ impl E2EProfile for Profile22 {
         Ok(())
     }
 
+    fn set_counter(&mut self, counter: u32) -> E2EResult<()> {
+        if counter > u32::from(COUNTER_MAX) {
+            return Err(E2EError::InvalidCounter {
+                counter,
+                max: u32::from(COUNTER_MAX),
+            });
+        }
+        // `protect` increments before it writes, so the next one carries `counter`.
+        self.counter = (counter as u8 + COUNTER_MODULO - 1) % COUNTER_MODULO;
+        Ok(())
+    }
+
     fn check(&mut self, data: &[u8]) -> E2EResult<E2EStatus> {
         // Check data length
         self.validate_length(data.len())?;
@@ -188,6 +200,28 @@ impl E2EProfile for Profile22 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Profile 22 increments before it writes, so the set counter still has to be the one sent.
+    #[test]
+    fn test_profile22_set_counter_is_what_the_next_protect_carries() {
+        let mut sender = Profile22::new(Profile22Config::default()).unwrap();
+        sender.set_counter(7).unwrap();
+        let mut data = [0u8; 8];
+        sender.protect(&mut data).unwrap();
+        assert_eq!(sender.read_counter(&data), 7);
+        sender.protect(&mut data).unwrap();
+        assert_eq!(sender.read_counter(&data), 8);
+        sender.set_counter(0).unwrap();
+        sender.protect(&mut data).unwrap();
+        assert_eq!(sender.read_counter(&data), 0);
+        assert!(matches!(
+            sender.set_counter(16),
+            Err(E2EError::InvalidCounter {
+                counter: 16,
+                max: 15
+            })
+        ));
+    }
     #[test]
     fn test_profile22_basic_example() {
         let mut profile_tx = Profile22::new(Profile22Config::default()).unwrap();

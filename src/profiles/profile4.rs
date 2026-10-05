@@ -222,6 +222,17 @@ impl E2EProfile for Profile4 {
         Ok(())
     }
 
+    fn set_counter(&mut self, counter: u32) -> E2EResult<()> {
+        if counter > u32::from(COUNTER_MAX) {
+            return Err(E2EError::InvalidCounter {
+                counter,
+                max: u32::from(COUNTER_MAX),
+            });
+        }
+        self.counter = counter as u16;
+        Ok(())
+    }
+
     fn check(&mut self, data: &[u8]) -> E2EResult<E2EStatus> {
         // Check data length
         self.validate_length(data.len() as u16)?;
@@ -244,6 +255,22 @@ impl E2EProfile for Profile4 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_profile4_set_counter_is_what_the_next_protect_carries() {
+        let mut sender = Profile4::new(Profile4Config::default()).unwrap();
+        sender.set_counter(0x1234).unwrap();
+        let mut data = [0u8; 16];
+        sender.protect(&mut data).unwrap();
+        assert_eq!(sender.read_counter(&data), 0x1234);
+        assert!(matches!(
+            sender.set_counter(0x1_0000),
+            Err(E2EError::InvalidCounter {
+                counter: 0x1_0000,
+                max: 0xFFFF
+            })
+        ));
+    }
     #[test]
     fn test_profile4_basic_example() {
         let mut profile_tx = Profile4::new(Profile4Config::default()).unwrap();

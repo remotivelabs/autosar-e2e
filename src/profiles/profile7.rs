@@ -239,6 +239,12 @@ impl E2EProfile for Profile7 {
         Ok(())
     }
 
+    /// Every `u32` is a counter of this profile, so this never fails.
+    fn set_counter(&mut self, counter: u32) -> E2EResult<()> {
+        self.counter = counter;
+        Ok(())
+    }
+
     fn check(&mut self, data: &[u8]) -> E2EResult<E2EStatus> {
         // Check data length
         self.validate_length(data.len() as u32)?;
