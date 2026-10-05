@@ -283,6 +283,17 @@ impl E2EProfile for Profile11 {
         Ok(())
     }
 
+    fn set_counter(&mut self, counter: u32) -> E2EResult<()> {
+        if counter > u32::from(COUNTER_MAX) {
+            return Err(E2EError::InvalidCounter {
+                counter,
+                max: u32::from(COUNTER_MAX),
+            });
+        }
+        self.counter = counter as u8;
+        Ok(())
+    }
+
     fn check(&mut self, data: &[u8]) -> E2EResult<E2EStatus> {
         // Check data length
         self.validate_length(data.len())?;

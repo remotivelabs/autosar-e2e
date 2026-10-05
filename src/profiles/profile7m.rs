@@ -94,6 +94,10 @@ impl E2EProfile for Profile7m {
         Ok(())
     }
 
+    fn set_counter(&mut self, counter: u32) -> E2EResult<()> {
+        self.base.set_counter(counter)
+    }
+
     fn check(&mut self, data: &[u8]) -> E2EResult<E2EStatus> {
         let mut status = self.base.check(data)?;
         let check_items = Profile7mCheck {
@@ -111,6 +115,19 @@ impl E2EProfile for Profile7m {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_profile7m_set_counter_reaches_the_base_profile() {
+        let config = Profile7Config {
+            min_data_length: 192,
+            ..Default::default()
+        };
+        let mut sender = Profile7m::new(config).unwrap();
+        sender.set_counter(u32::MAX).unwrap();
+        let mut data = [0u8; 28];
+        sender.protect(&mut data).unwrap();
+        assert_eq!(&data[12..16], &u32::MAX.to_be_bytes());
+    }
     #[test]
     fn test_profile7m_basic_request_example() {
         let config = Profile7Config {

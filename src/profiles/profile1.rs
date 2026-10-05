@@ -314,6 +314,17 @@ impl E2EProfile for Profile1 {
         Ok(())
     }
 
+    fn set_counter(&mut self, counter: u32) -> E2EResult<()> {
+        if counter > u32::from(COUNTER_MAX) {
+            return Err(E2EError::InvalidCounter {
+                counter,
+                max: u32::from(COUNTER_MAX),
+            });
+        }
+        self.counter = counter as u8;
+        Ok(())
+    }
+
     fn check(&mut self, data: &[u8]) -> E2EResult<E2EStatus> {
         // Check data length
         self.validate_length(data.len())?;
@@ -340,6 +351,30 @@ impl E2EProfile for Profile1 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_profile1_set_counter_is_what_the_next_protect_carries() {
+        let mut sender = Profile1::new(config(Profile1IdMode::Both)).unwrap();
+        sender.set_counter(7).unwrap();
+        let mut data = [0u8; 8];
+        sender.protect(&mut data).unwrap();
+        assert_eq!(
+            sender.read_nibble_data(sender.config.counter_offset, &data),
+            7
+        );
+        sender.protect(&mut data).unwrap();
+        assert_eq!(
+            sender.read_nibble_data(sender.config.counter_offset, &data),
+            8
+        );
+        assert!(matches!(
+            sender.set_counter(15),
+            Err(E2EError::InvalidCounter {
+                counter: 15,
+                max: 14
+            })
+        ));
+    }
     use crate::profile11::{Profile11, Profile11Config, Profile11IdMode};
 
     fn config(mode: Profile1IdMode) -> Profile1Config {

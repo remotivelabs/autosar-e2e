@@ -92,6 +92,10 @@ pub enum E2EError {
     /// Invalid data format
     #[error("Invalid data format: {0}")]
     InvalidDataFormat(String),
+
+    /// A counter the profile never sends: beyond its width, or a value it reserves
+    #[error("Invalid counter: {counter} is beyond the profile's maximum {max}")]
+    InvalidCounter { counter: u32, max: u32 },
 }
 
 // Main trait for E2E Profile implementations
@@ -127,6 +131,19 @@ pub trait E2EProfile {
     /// * `Ok(())` if protection was successfully added
     /// * `Err(E2EError)` if an error occurred
     fn protect(&mut self, data: &mut [u8]) -> E2EResult<()>;
+
+    /// Set the counter the next `protect` carries
+    ///
+    /// A sender continues from a counter it did not count itself: one a forwarded payload
+    /// already carries, or one the application supplied. Counting goes on from there.
+    ///
+    /// # Arguments
+    /// * `counter` - The counter the next protected data carries
+    ///
+    /// # Errors
+    /// Returns `E2EError::InvalidCounter` when the profile never sends `counter`: beyond its
+    /// counter width, or a value it reserves, such as profile 1's 15
+    fn set_counter(&mut self, counter: u32) -> E2EResult<()>;
 
     /// Check E2E protection on received data
     ///
