@@ -53,7 +53,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-autosar-e2e = "1.0.0"
+autosar-e2e = "2.0.0"
 ```
 
 ## Quick Start
@@ -152,6 +152,9 @@ pub trait E2EProfile {
 
     /// Add E2E protection to data buffer (in-place)
     fn protect(&mut self, data: &mut [u8]) -> E2EResult<()>;
+
+    /// Set the counter the next `protect` carries
+    fn set_counter(&mut self, counter: u32) -> E2EResult<()>;
 
     /// Verify E2E protection on received data
     fn check(&mut self, data: &[u8]) -> E2EResult<E2EStatus>;
