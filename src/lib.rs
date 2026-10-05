@@ -101,10 +101,10 @@ pub enum E2EError {
 // Main trait for E2E Profile implementations
 ///
 /// This trait defines the common interface that all E2E profiles must implement.
-/// Each profile provides three main operations:
+/// Each profile provides three operations:
 /// - `protect`: Add E2E protection to data
+/// - `set_counter`: Set the counter the next `protect` carries
 /// - `check`: Verify E2E protection on received data
-/// - `forward`: Forward protected data (Profile 11 specific)
 pub trait E2EProfile {
     /// Configuration type for this profile
     type Config;
