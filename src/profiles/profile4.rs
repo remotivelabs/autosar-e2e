@@ -80,6 +80,13 @@ impl Profile4 {
                 "Maximum Data length shall be between MinDataLength and 4096B".into(),
             ));
         }
+        if !config.offset.is_multiple_of(BITS_PER_BYTE)
+            || config.max_data_length - 12 * BITS_PER_BYTE < config.offset
+        {
+            return Err(E2EError::InvalidConfiguration(
+                "Offset shall be a multiple of 8 between 0 and MaxDataLength - 12B".into(),
+            ));
+        }
         if config.max_delta_counter == 0 || config.max_delta_counter == COUNTER_MAX {
             return Err(E2EError::InvalidConfiguration(format!(
                 "Max delta counter must be between 1 and {}",
@@ -90,6 +97,13 @@ impl Profile4 {
     }
     /// Validate data length against min/max constraints
     fn validate_length(&self, len: u16) -> E2EResult<()> {
+        let header_end = self.config.offset / BITS_PER_BYTE + 12;
+        if len < header_end {
+            return Err(E2EError::InvalidDataFormat(format!(
+                "Expected at least {} bytes to hold the header, got {} bytes",
+                header_end, len
+            )));
+        }
         let min_bytes = self.config.min_data_length / BITS_PER_BYTE;
         let max_bytes = self.config.max_data_length / BITS_PER_BYTE;
         if len < min_bytes || max_bytes < len {
@@ -389,5 +403,48 @@ mod tests {
             profile_tx.protect(&mut data).unwrap();
             assert_eq!(profile_rx.check(&data).unwrap(), E2EStatus::Ok);
         }
+    }
+
+    #[test]
+    fn test_profile4_header_offset_past_the_maximum_length_is_refused() {
+        for offset in [4, 424] {
+            let config = Profile4Config {
+                offset,
+                max_data_length: 64 * 8,
+                ..Default::default()
+            };
+            assert!(
+                matches!(
+                    Profile4::new(config),
+                    Err(E2EError::InvalidConfiguration(_))
+                ),
+                "offset {offset}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_profile4_header_offset_past_the_frame_is_refused() {
+        let config = Profile4Config {
+            offset: 64,
+            max_data_length: 64 * 8,
+            ..Default::default()
+        };
+        let mut profile_tx = Profile4::new(config.clone()).unwrap();
+        let mut profile_rx = Profile4::new(config).unwrap();
+
+        let mut data = vec![0x00; 64];
+        profile_tx.protect(&mut data).unwrap();
+        assert_eq!(profile_rx.check(&data).unwrap(), E2EStatus::Ok);
+
+        let mut short = vec![0x00; 12];
+        assert!(matches!(
+            profile_tx.protect(&mut short),
+            Err(E2EError::InvalidDataFormat(_))
+        ));
+        assert!(matches!(
+            profile_rx.check(&short),
+            Err(E2EError::InvalidDataFormat(_))
+        ));
     }
 }
