@@ -95,8 +95,8 @@ impl Profile6 {
         Ok(())
     }
     /// Validate data length against min/max constraints
-    fn validate_length(&self, len: u16) -> E2EResult<()> {
-        let header_end = self.config.offset / BITS_PER_BYTE + 5;
+    fn validate_length(&self, len: usize) -> E2EResult<u16> {
+        let header_end = usize::from(self.config.offset / BITS_PER_BYTE) + 5;
         if len < header_end {
             return Err(E2EError::InvalidDataFormat(format!(
                 "Expected at least {} bytes to hold the header, got {} bytes",
@@ -105,13 +105,13 @@ impl Profile6 {
         }
         let min_bytes = self.config.min_data_length / BITS_PER_BYTE;
         let max_bytes = self.config.max_data_length / BITS_PER_BYTE;
-        if len < min_bytes || max_bytes < len {
-            return Err(E2EError::InvalidDataFormat(format!(
+        match u16::try_from(len) {
+            Ok(len) if (min_bytes..=max_bytes).contains(&len) => Ok(len),
+            _ => Err(E2EError::InvalidDataFormat(format!(
                 "Expected {} - {} bytes, got {} bytes",
                 min_bytes, max_bytes, len
-            )));
+            ))),
         }
-        Ok(())
     }
     fn write_data_length(&self, data: &mut [u8]) {
         let offset = (self.config.offset / BITS_PER_BYTE) as usize;
@@ -198,7 +198,7 @@ impl E2EProfile for Profile6 {
     }
 
     fn protect(&mut self, data: &mut [u8]) -> E2EResult<()> {
-        self.validate_length(data.len() as u16)?;
+        self.validate_length(data.len())?;
         self.write_data_length(data);
         self.write_counter(data);
         let calculated_crc = self.compute_crc(data);
@@ -220,13 +220,13 @@ impl E2EProfile for Profile6 {
 
     fn check(&mut self, data: &[u8]) -> E2EResult<E2EStatus> {
         // Check data length
-        self.validate_length(data.len() as u16)?;
+        let data_len = self.validate_length(data.len())?;
         let check_items = Profile6Check {
             rx_data_length: self.read_data_length(data),
             rx_counter: self.read_counter(data),
             rx_crc: self.read_crc(data),
             calculated_crc: self.compute_crc(data),
-            data_len: data.len() as u16,
+            data_len,
         };
         Ok(self.do_checks(check_items))
     }

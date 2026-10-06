@@ -80,9 +80,9 @@ impl Profile5 {
         Ok(())
     }
     /// Validate data length against min/max constraints
-    fn validate_length(&self, len: u16) -> E2EResult<()> {
+    fn validate_length(&self, len: usize) -> E2EResult<()> {
         let expected_bytes = self.config.data_length / BITS_PER_BYTE;
-        if len != expected_bytes {
+        if len != usize::from(expected_bytes) {
             return Err(E2EError::InvalidDataFormat(format!(
                 "Expected {} bytes, got {} bytes",
                 expected_bytes, len
@@ -162,7 +162,7 @@ impl E2EProfile for Profile5 {
     }
 
     fn protect(&mut self, data: &mut [u8]) -> E2EResult<()> {
-        self.validate_length(data.len() as u16)?;
+        self.validate_length(data.len())?;
         self.write_counter(data);
         let calculated_crc = self.compute_crc(data);
         self.write_crc(calculated_crc, data);
@@ -183,7 +183,7 @@ impl E2EProfile for Profile5 {
 
     fn check(&mut self, data: &[u8]) -> E2EResult<E2EStatus> {
         // Check data length
-        self.validate_length(data.len() as u16)?;
+        self.validate_length(data.len())?;
         let check_items = Profile5Check {
             rx_counter: self.read_counter(data),
             rx_crc: self.read_crc(data),
