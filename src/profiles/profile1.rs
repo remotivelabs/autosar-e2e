@@ -112,7 +112,7 @@ pub struct Profile1Check {
 pub struct Profile1 {
     config: Profile1Config,
     counter: u8,
-    initialized: bool,
+    received_counter: u8,
 }
 
 impl Profile1 {
@@ -254,33 +254,24 @@ impl Profile1 {
             return E2EStatus::WrongSequence;
         }
         let status = self.validate_counter(check_items.rx_counter);
-        self.counter = check_items.rx_counter;
+        self.received_counter = check_items.rx_counter;
         status
     }
     /// Check if counter delta is within acceptable range
-    fn check_counter_delta(&self, received_counter: u8) -> u8 {
-        if received_counter >= self.counter {
-            received_counter - self.counter
+    fn check_counter_delta(&self, rx_counter: u8) -> u8 {
+        if rx_counter >= self.received_counter {
+            rx_counter - self.received_counter
         } else {
             // Handle wrap-around
-            (COUNTER_MODULO + received_counter - self.counter) % COUNTER_MODULO
+            (COUNTER_MODULO + rx_counter - self.received_counter) % COUNTER_MODULO
         }
     }
     fn validate_counter(&self, rx_counter: u8) -> E2EStatus {
-        let delta = self.check_counter_delta(rx_counter);
-
-        if delta == 0 {
-            if self.initialized {
-                E2EStatus::Repeated
-            } else {
-                E2EStatus::Ok
-            }
-        } else if delta == 1 {
-            E2EStatus::Ok
-        } else if delta >= 2 && delta <= self.config.max_delta_counter {
-            E2EStatus::OkSomeLost
-        } else {
-            E2EStatus::WrongSequence
+        match self.check_counter_delta(rx_counter) {
+            0 => E2EStatus::Repeated,
+            1 => E2EStatus::Ok,
+            delta if delta <= self.config.max_delta_counter => E2EStatus::OkSomeLost,
+            _ => E2EStatus::WrongSequence,
         }
     }
 }
@@ -294,7 +285,8 @@ impl E2EProfile for Profile1 {
         Ok(Self {
             config,
             counter: 0,
-            initialized: false,
+            // Starts at 0xE, as E2E_P11CheckInit does, since this check follows profile 11's.
+            received_counter: COUNTER_MAX,
         })
     }
 
@@ -340,11 +332,7 @@ impl E2EProfile for Profile1 {
             rx_crc: self.read_crc(data),
             calculated_crc: self.compute_crc(data, rx_counter),
         };
-        let status = self.do_checks(check_items);
-        if !self.initialized && matches!(status, E2EStatus::Ok | E2EStatus::OkSomeLost) {
-            self.initialized = true;
-        }
-        Ok(status)
+        Ok(self.do_checks(check_items))
     }
 }
 
@@ -665,5 +653,40 @@ mod tests {
         let mut data = vec![0x00; 4];
         assert!(profile.protect(&mut data).is_err());
         assert!(profile.check(&data).is_err());
+    }
+
+    #[test]
+    fn test_profile1_fresh_receiver_follows_a_fresh_sender_from_counter_zero() {
+        let mut profile_tx = Profile1::new(config(Profile1IdMode::Both)).unwrap();
+        let mut profile_rx = Profile1::new(config(Profile1IdMode::Both)).unwrap();
+        let mut data = vec![0x00; 8];
+        profile_tx.protect(&mut data).unwrap();
+        assert_eq!(
+            profile_tx.read_nibble_data(profile_tx.config.counter_offset, &data),
+            0
+        );
+        assert_eq!(profile_rx.check(&data).unwrap(), E2EStatus::Ok);
+        profile_tx.protect(&mut data).unwrap();
+        assert_eq!(profile_rx.check(&data).unwrap(), E2EStatus::Ok);
+    }
+
+    #[test]
+    fn test_profile1_receiver_joining_a_running_stream_is_in_step_after_one_frame() {
+        for (max_delta_counter, first) in
+            [(1, E2EStatus::WrongSequence), (2, E2EStatus::OkSomeLost)]
+        {
+            let config = Profile1Config {
+                max_delta_counter,
+                ..config(Profile1IdMode::Both)
+            };
+            let mut profile_tx = Profile1::new(config.clone()).unwrap();
+            let mut profile_rx = Profile1::new(config).unwrap();
+            profile_tx.set_counter(1).unwrap();
+            let mut data = vec![0x00; 8];
+            profile_tx.protect(&mut data).unwrap();
+            assert_eq!(profile_rx.check(&data).unwrap(), first);
+            profile_tx.protect(&mut data).unwrap();
+            assert_eq!(profile_rx.check(&data).unwrap(), E2EStatus::Ok);
+        }
     }
 }

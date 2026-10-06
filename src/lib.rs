@@ -152,6 +152,10 @@ pub trait E2EProfile {
     /// - Sequence counter continuity
     /// - Data ID (if applicable)
     ///
+    /// The receive counter starts at the counter's maximum, as E2E_P0xCheckInit does, so a stream
+    /// that starts at 0 checks `Ok` from its first frame. A receiver joining a running stream sees
+    /// one `WrongSequence`, or `OkSomeLost` within the max delta, and is in step from then on.
+    ///
     /// # Arguments
     /// * `data` - Reference to the received data buffer
     ///
