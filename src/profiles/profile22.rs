@@ -61,6 +61,7 @@ pub struct Profile22Check {
 pub struct Profile22 {
     config: Profile22Config,
     counter: u8,
+    received_counter: u8,
 }
 
 impl Profile22 {
@@ -127,29 +128,24 @@ impl Profile22 {
             return E2EStatus::CrcError;
         }
         let status = self.validate_counter(check_items.rx_counter);
-        self.counter = check_items.rx_counter;
+        self.received_counter = check_items.rx_counter;
         status
     }
     /// Check if counter delta is within acceptable range
-    fn check_counter_delta(&self, received_counter: u8) -> u8 {
-        if received_counter >= self.counter {
-            received_counter - self.counter
+    fn check_counter_delta(&self, rx_counter: u8) -> u8 {
+        if rx_counter >= self.received_counter {
+            rx_counter - self.received_counter
         } else {
             // Handle wrap-around
-            (COUNTER_MODULO + received_counter - self.counter) % COUNTER_MODULO
+            (COUNTER_MODULO + rx_counter - self.received_counter) % COUNTER_MODULO
         }
     }
     fn validate_counter(&self, rx_counter: u8) -> E2EStatus {
-        let delta = self.check_counter_delta(rx_counter);
-
-        if delta == 0 {
-            E2EStatus::Repeated
-        } else if delta == 1 {
-            E2EStatus::Ok
-        } else if delta >= 2 && delta <= self.config.max_delta_counter {
-            E2EStatus::OkSomeLost
-        } else {
-            E2EStatus::WrongSequence
+        match self.check_counter_delta(rx_counter) {
+            0 => E2EStatus::Repeated,
+            1 => E2EStatus::Ok,
+            delta if delta <= self.config.max_delta_counter => E2EStatus::OkSomeLost,
+            _ => E2EStatus::WrongSequence,
         }
     }
 }
@@ -160,15 +156,20 @@ impl E2EProfile for Profile22 {
     fn new(config: Self::Config) -> E2EResult<Self> {
         // Validate config
         Self::validate_config(&config)?;
-        Ok(Self { config, counter: 0 })
+        Ok(Self {
+            config,
+            counter: 0,
+            // Starts at the maximum, as E2E_P22CheckInit does: one step before a stream's first 0.
+            received_counter: COUNTER_MAX,
+        })
     }
 
     fn protect(&mut self, data: &mut [u8]) -> E2EResult<()> {
         self.validate_length(data.len())?;
-        self.increment_counter();
         self.write_counter(data);
         let calculated_crc = self.compute_crc(data);
         self.write_crc(calculated_crc, data);
+        self.increment_counter();
         Ok(())
     }
 
@@ -179,8 +180,7 @@ impl E2EProfile for Profile22 {
                 max: u32::from(COUNTER_MAX),
             });
         }
-        // `protect` increments before it writes, so the next one carries `counter`.
-        self.counter = (counter as u8 + COUNTER_MODULO - 1) % COUNTER_MODULO;
+        self.counter = counter as u8;
         Ok(())
     }
 
@@ -201,7 +201,6 @@ impl E2EProfile for Profile22 {
 mod tests {
     use super::*;
 
-    /// Profile 22 increments before it writes, so the set counter still has to be the one sent.
     #[test]
     fn test_profile22_set_counter_is_what_the_next_protect_carries() {
         let mut sender = Profile22::new(Profile22Config::default()).unwrap();
@@ -228,6 +227,10 @@ mod tests {
         let mut profile_rx = Profile22::new(Profile22Config::default()).unwrap();
 
         let mut data = vec![0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
+        profile_tx.protect(&mut data).unwrap();
+        assert_eq!(data[0], 0x0e);
+        assert_eq!(data[1], 0x00);
+        assert_eq!(profile_rx.check(&data).unwrap(), E2EStatus::Ok);
         profile_tx.protect(&mut data).unwrap();
         assert_eq!(data[0], 0x1b);
         assert_eq!(data[1], 0x01);
@@ -288,16 +291,12 @@ mod tests {
         assert_eq!(data[0], 0xcd);
         assert_eq!(data[1], 0x0f);
         assert_eq!(profile_rx.check(&data).unwrap(), E2EStatus::Ok);
-        profile_tx.protect(&mut data).unwrap();
-        assert_eq!(data[0], 0x0e);
-        assert_eq!(data[1], 0x00);
-        assert_eq!(profile_rx.check(&data).unwrap(), E2EStatus::Ok);
     }
 
     #[test]
     fn test_profile22_at_offset_zero_is_profile2_on_the_wire() {
         // Profile 2 CRC over the data after the CRC byte, then the counter's Data ID.
-        // Each frame carries counter 1, the first a sender writes.
+        // Each frame carries counter 1, the first a profile 2 sender writes and the second here.
         let vectors: &[(u8, &[u8], u8)] = &[
             (0x12, &[0x01, 0x02, 0x03], 0x5f),
             (0xff, &[0x01, 0x02, 0x03], 0xed),
@@ -314,6 +313,8 @@ mod tests {
             let mut profile_tx = Profile22::new(config.clone()).unwrap();
             let mut profile_rx = Profile22::new(config).unwrap();
             let mut frame = [&[0x00], *data].concat();
+            profile_tx.protect(&mut frame).unwrap();
+            assert_eq!(profile_rx.check(&frame).unwrap(), E2EStatus::Ok);
             profile_tx.protect(&mut frame).unwrap();
             assert_eq!(&frame[1..], *data, "data_id {data_id:#04x}");
             assert_eq!(frame[0], *expected, "data_id {data_id:#04x}");
@@ -337,8 +338,40 @@ mod tests {
             0x00, 0x00,
         ];
         profile_tx.protect(&mut data1).unwrap();
-        assert_eq!(data1[8], 0x14);
-        assert_eq!(data1[9], 0x01);
+        assert_eq!(data1[8], 0x01);
+        assert_eq!(data1[9], 0x00);
         assert_eq!(profile_rx.check(&data1).unwrap(), E2EStatus::Ok);
+    }
+
+    #[test]
+    fn test_profile22_fresh_receiver_follows_a_fresh_sender_from_counter_zero() {
+        let mut profile_tx = Profile22::new(Profile22Config::default()).unwrap();
+        let mut profile_rx = Profile22::new(Profile22Config::default()).unwrap();
+        let mut data = vec![0x00; 8];
+        profile_tx.protect(&mut data).unwrap();
+        assert_eq!(profile_tx.read_counter(&data), 0);
+        assert_eq!(profile_rx.check(&data).unwrap(), E2EStatus::Ok);
+        profile_tx.protect(&mut data).unwrap();
+        assert_eq!(profile_rx.check(&data).unwrap(), E2EStatus::Ok);
+    }
+
+    #[test]
+    fn test_profile22_receiver_joining_a_running_stream_is_in_step_after_one_frame() {
+        for (max_delta_counter, first) in
+            [(1, E2EStatus::WrongSequence), (2, E2EStatus::OkSomeLost)]
+        {
+            let config = Profile22Config {
+                max_delta_counter,
+                ..Default::default()
+            };
+            let mut profile_tx = Profile22::new(config.clone()).unwrap();
+            let mut profile_rx = Profile22::new(config).unwrap();
+            profile_tx.set_counter(1).unwrap();
+            let mut data = vec![0x00; 8];
+            profile_tx.protect(&mut data).unwrap();
+            assert_eq!(profile_rx.check(&data).unwrap(), first);
+            profile_tx.protect(&mut data).unwrap();
+            assert_eq!(profile_rx.check(&data).unwrap(), E2EStatus::Ok);
+        }
     }
 }
