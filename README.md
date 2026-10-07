@@ -25,6 +25,7 @@ This library implements the AUTOSAR E2E protection mechanism which provides **en
 | Profile | Description | CRC | Counter | Data ID | Status |
 |---------|-------------|-----|---------|---------|--------|
 | **Profile 1** | Legacy, bus-compatible with 11; Both/Alt/Low/Nibble | 8-bit | 4-bit | 16-bit | Complete |
+| **Profile 2** | Profile 22's wire format, profile 2's counter start | 8-bit | 4-bit | Variable | Complete |
 | **Profile 4** | Large packets, low overhead | 32-bit | 16-bit | 32-bit | Complete |
 | **Profile 4M** | Profile 4 + message metadata | 32-bit | 16-bit | 32-bit | Complete |
 | **Profile 5** | Small packets, minimal overhead | 16-bit | 8-bit | 16-bit | Complete |
@@ -35,7 +36,7 @@ This library implements the AUTOSAR E2E protection mechanism which provides **en
 | **Profile 11** | Nibble/Both variants | 8-bit | 4-bit | Variable | Complete |
 | **Profile 22** | Enhanced protection | 8-bit | 4-bit | Variable | Complete |
 
-Profile 2 needs no profile of its own: Profile 22 at offset 0 puts the same bytes on the wire.
+Profile 2 puts the same bytes on the wire as Profile 22 at offset 0, but its sender starts at counter 1 and its receiver takes any first counter.
 
 ### Key Features
 
@@ -135,6 +136,7 @@ src/
 │   ├── profile7m.rs    # Profile 7 + message metadata
 │   ├── profile8.rs     # Flexible protection, 32-bit CRC
 │   ├── profile11.rs    # Nibble/Both variants
+│   ├── profile2.rs     # Profile 22's wire format, profile 2's counter start
 │   └── profile22.rs    # Enhanced protection
 └── profiles.rs         # Profiles module
 ```
