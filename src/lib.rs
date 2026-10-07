@@ -45,6 +45,7 @@ use thiserror::Error;
 mod profiles;
 pub use profiles::profile1;
 pub use profiles::profile11;
+pub use profiles::profile2;
 pub use profiles::profile22;
 pub use profiles::profile4;
 pub use profiles::profile4m;
